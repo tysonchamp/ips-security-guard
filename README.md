@@ -85,4 +85,4 @@ ips-security-guard/
 
 ## License
 
-GPL v2 or later. Developed for Indian Public School (IPS Howrah).
+GPL v2 or later.
