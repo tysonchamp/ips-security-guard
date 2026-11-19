@@ -47,8 +47,14 @@ class IPS_Security_Htaccess {
 		$rules .= "# 5. Block direct web access to wp-config.php and version disclosure files\n";
 		$rules .= "RewriteRule ^wp-config\.php$ - [F,L]\n";
 		$rules .= "RewriteRule ^(readme\.html|license\.txt) - [F,L]\n\n";
-		$rules .= "# 6. Block access to xmlrpc.php to prevent DDoS amplification and brute-force attacks\n";
-		$rules .= "RewriteRule ^xmlrpc\.php$ - [F,L]\n\n";
+		// 6. XML-RPC block is conditional on the saved setting
+		$settings = get_option( 'ips_security_settings', array() );
+		$disable_xmlrpc = isset( $settings['disable_xmlrpc'] ) ? (bool) $settings['disable_xmlrpc'] : true;
+		if ( $disable_xmlrpc ) {
+			$rules .= "# 6. Block access to xmlrpc.php to prevent DDoS amplification and brute-force attacks\n";
+			$rules .= "RewriteRule ^xmlrpc\.php$ - [F,L]\n\n";
+		}
+
 		$rules .= "# 7. Prevent executing PHP scripts inside uploads directory\n";
 		$rules .= "RewriteRule ^wp-content/uploads/.*\.(?:php[0-9]*|pht|phtml|phps|phar)$ - [F,L,NC]\n";
 		$rules .= "</IfModule>\n";

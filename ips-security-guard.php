@@ -3,7 +3,7 @@
  * Plugin Name:       IPS Security Guard
  * Plugin URI:        https://www.tysonchamp.com/
  * Description:       Advanced WordPress security hardening, application firewall, brute-force shield, and .htaccess protection.
- * Version:           1.0.0
+ * Version:           1.1.0
  * Author:            Tyson Champ
  * Author URI:        https://www.tysonchamp.com/
  * License:           GPL v2 or later
@@ -14,7 +14,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'IPS_SECURITY_VERSION', '1.0.0' );
+define( 'IPS_SECURITY_VERSION', '1.1.0' );
 define( 'IPS_SECURITY_PATH', plugin_dir_path( __FILE__ ) );
 define( 'IPS_SECURITY_URL', plugin_dir_url( __FILE__ ) );
 

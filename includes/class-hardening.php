@@ -18,10 +18,12 @@ class IPS_Security_Hardening {
 		// 1. Send Security HTTP Headers
 		add_action( 'send_headers', array( __CLASS__, 'send_security_headers' ) );
 
-		// 2. Disable XML-RPC completely
-		add_filter( 'xmlrpc_enabled', '__return_false' );
-		add_filter( 'wp_headers', array( __CLASS__, 'remove_pingback_header' ) );
-		add_filter( 'xmlrpc_methods', '__return_empty_array' );
+		// 2. Disable XML-RPC (only when the option is enabled)
+		if ( self::is_xmlrpc_disabled() ) {
+			add_filter( 'xmlrpc_enabled', '__return_false' );
+			add_filter( 'wp_headers', array( __CLASS__, 'remove_pingback_header' ) );
+			add_filter( 'xmlrpc_methods', '__return_empty_array' );
+		}
 
 		// 3. Block User & Author Enumeration
 		add_action( 'init', array( __CLASS__, 'block_author_scan' ) );
@@ -49,6 +51,17 @@ class IPS_Security_Hardening {
 			header( 'Referrer-Policy: strict-origin-when-cross-origin' );
 			header( 'Permissions-Policy: camera=(), microphone=(), geolocation=()' );
 		}
+	}
+
+	/**
+	 * Check if XML-RPC should be disabled based on the saved option.
+	 *
+	 * @return bool
+	 */
+	public static function is_xmlrpc_disabled() {
+		$settings = get_option( 'ips_security_settings', array() );
+		// Default: disabled (true) for safety; admin can explicitly enable it
+		return isset( $settings['disable_xmlrpc'] ) ? (bool) $settings['disable_xmlrpc'] : true;
 	}
 
 	/**

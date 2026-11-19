@@ -52,6 +52,15 @@ class IPS_Security_Admin {
 			check_admin_referer( 'ips_sec_clear_logs_nonce' );
 			delete_option( 'ips_security_logs' );
 			add_settings_error( 'ips_sec_notices', 'logs_cleared', 'Security audit logs have been cleared.', 'updated' );
+		} elseif ( 'save_settings' === $action ) {
+			check_admin_referer( 'ips_sec_save_settings_nonce' );
+			$settings                   = get_option( 'ips_security_settings', array() );
+			$settings['disable_xmlrpc'] = isset( $_POST['disable_xmlrpc'] ) ? 1 : 0;
+			update_option( 'ips_security_settings', $settings );
+			// Re-apply htaccess so the xmlrpc.php rule is added/removed immediately
+			IPS_Security_Htaccess::apply_rules();
+			$xmlrpc_state = $settings['disable_xmlrpc'] ? 'disabled' : 'enabled';
+			add_settings_error( 'ips_sec_notices', 'settings_saved', 'Settings saved. XML-RPC is now <strong>' . esc_html( $xmlrpc_state ) . '</strong>. .htaccess has been updated.', 'updated' );
 		}
 	}
 
@@ -65,7 +74,8 @@ class IPS_Security_Admin {
 
 		$root_rules_active    = IPS_Security_Htaccess::are_rules_active();
 		$uploads_protected    = IPS_Security_Htaccess::is_uploads_protected();
-		$xmlrpc_disabled      = ! (bool) apply_filters( 'xmlrpc_enabled', true );
+		$settings             = get_option( 'ips_security_settings', array() );
+		$xmlrpc_disabled      = isset( $settings['disable_xmlrpc'] ) ? (bool) $settings['disable_xmlrpc'] : true;
 		$file_editor_disabled = defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT;
 		$logs                 = get_option( 'ips_security_logs', array() );
 
@@ -116,7 +126,11 @@ class IPS_Security_Admin {
 								<tr>
 									<td><strong>XML-RPC Attack Defense</strong></td>
 									<td>
-										<span style="color:#46b450;font-weight:bold;">&#x2714; Disabled</span>
+										<?php if ( $xmlrpc_disabled ) : ?>
+											<span style="color:#46b450;font-weight:bold;">&#x2714; Blocked</span>
+										<?php else : ?>
+											<span style="color:#f0b849;font-weight:bold;">&#x26A0; Enabled</span>
+										<?php endif; ?>
 									</td>
 									<td>Protects against DDoS amplification, brute force, and unauthorized pingbacks.</td>
 								</tr>
@@ -207,6 +221,37 @@ class IPS_Security_Admin {
 							<input type="hidden" name="ips_sec_action" value="apply_htaccess">
 							<button type="submit" class="button button-primary" style="width:100%; height:40px; font-size:14px;">
 								<span class="dashicons dashicons-update" style="vertical-align:middle;"></span> Reapply .htaccess Rules
+							</button>
+						</form>
+					</div>
+
+					<div class="postbox" style="padding:20px;">
+						<h2 style="margin-top:0;">Security Settings</h2>
+						<form method="post">
+							<?php wp_nonce_field( 'ips_sec_save_settings_nonce' ); ?>
+							<input type="hidden" name="ips_sec_action" value="save_settings">
+
+							<table class="form-table" style="margin:0;">
+								<tr>
+									<th scope="row" style="padding-left:0;">
+										<label for="disable_xmlrpc">XML-RPC</label>
+									</th>
+									<td style="padding-left:0;">
+										<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+											<input type="checkbox" id="disable_xmlrpc" name="disable_xmlrpc" value="1"
+												<?php checked( $xmlrpc_disabled, true ); ?>>
+											<span>Disable XML-RPC</span>
+										</label>
+										<p class="description" style="margin-top:6px;">
+											Blocks <code>xmlrpc.php</code> entirely — recommended unless you use
+											Jetpack, the WordPress mobile app, or another service that requires XML-RPC.
+										</p>
+									</td>
+								</tr>
+							</table>
+
+							<button type="submit" class="button button-primary" style="margin-top:12px;">
+								<span class="dashicons dashicons-saved" style="vertical-align:middle;"></span> Save Settings
 							</button>
 						</form>
 					</div>
