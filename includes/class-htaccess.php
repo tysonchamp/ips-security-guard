@@ -23,19 +23,33 @@ class IPS_Security_Htaccess {
 		$base      = ! empty( $home_path ) ? trailingslashit( $home_path ) : '/';
 
 		$rules  = "# BEGIN " . self::MARKER . "\n";
+
+		$rules .= "# 0. Disable directory browsing\n";
+		$rules .= "Options -Indexes\n\n";
+
+		$rules .= "# 1. Protect .htaccess itself\n";
+		$rules .= "<Files .htaccess>\n";
+		$rules .= "    Require all denied\n";
+		$rules .= "</Files>\n\n";
+
+		$rules .= "# 2. Block access to sensitive files (backups, configs, scripts, swap files)\n";
+		$rules .= "<FilesMatch \"(^#.*#|\\.(bak|conf|dist|fla|inc|ini|log|psd|sh|sql|sw[op])|~)$\">\n";
+		$rules .= "    Require all denied\n";
+		$rules .= "</FilesMatch>\n\n";
+
 		$rules .= "<IfModule mod_rewrite.c>\n";
 		$rules .= "RewriteEngine On\n";
 		$rules .= "RewriteBase " . $base . "\n\n";
-		$rules .= "# 1. Block access to hidden files and directories (e.g., .git, .env)\n";
+		$rules .= "# 3. Block access to hidden files and directories (e.g., .git, .env)\n";
 		$rules .= "RewriteRule (^|/)\.(?!well-known) - [F,L]\n\n";
-		$rules .= "# 2. Block direct web access to sensitive file extensions (database dumps, backups, configs)\n";
-		$rules .= "RewriteRule \.(sql|bak|config|dist|fla|inc|ini|log|psd|sh|tar|zip|gz|env)$ - [F,L]\n\n";
-		$rules .= "# 3. Block direct web access to wp-config.php and version disclosure files\n";
+		$rules .= "# 4. Block direct web access to sensitive file extensions (database dumps, backups, configs)\n";
+		$rules .= "RewriteRule \.(sql|bak|conf|config|dist|fla|inc|ini|log|psd|sh|sw[op]|tar|zip|gz|env)$ - [F,L]\n\n";
+		$rules .= "# 5. Block direct web access to wp-config.php and version disclosure files\n";
 		$rules .= "RewriteRule ^wp-config\.php$ - [F,L]\n";
 		$rules .= "RewriteRule ^(readme\.html|license\.txt) - [F,L]\n\n";
-		$rules .= "# 4. Block access to xmlrpc.php to prevent DDoS amplification and brute-force attacks\n";
+		$rules .= "# 6. Block access to xmlrpc.php to prevent DDoS amplification and brute-force attacks\n";
 		$rules .= "RewriteRule ^xmlrpc\.php$ - [F,L]\n\n";
-		$rules .= "# 5. Prevent executing PHP scripts inside uploads directory\n";
+		$rules .= "# 7. Prevent executing PHP scripts inside uploads directory\n";
 		$rules .= "RewriteRule ^wp-content/uploads/.*\.(?:php[0-9]*|pht|phtml|phps|phar)$ - [F,L,NC]\n";
 		$rules .= "</IfModule>\n";
 		$rules .= "# END " . self::MARKER . "\n";
