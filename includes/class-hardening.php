@@ -12,6 +12,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class IPS_Security_Hardening {
 
 	/**
+	 * Whether DISALLOW_FILE_MODS was already defined before this plugin initialized.
+	 *
+	 * @var bool
+	 */
+	private static $file_mods_defined_externally = false;
+
+	/**
 	 * Initialize hardening filters & actions
 	 */
 	public static function init() {
@@ -38,6 +45,32 @@ class IPS_Security_Hardening {
 		if ( ! defined( 'DISALLOW_FILE_EDIT' ) ) {
 			define( 'DISALLOW_FILE_EDIT', true );
 		}
+
+		// 6. Lock plugin/theme installs, ZIP uploads, and updates when enabled
+		self::$file_mods_defined_externally = defined( 'DISALLOW_FILE_MODS' );
+		if ( self::is_file_mods_disabled() && ! self::$file_mods_defined_externally ) {
+			define( 'DISALLOW_FILE_MODS', true );
+		}
+	}
+
+	/**
+	 * Check if DISALLOW_FILE_MODS was defined externally (e.g. wp-config.php).
+	 *
+	 * @return bool
+	 */
+	public static function is_file_mods_defined_externally() {
+		return self::$file_mods_defined_externally;
+	}
+
+	/**
+	 * Check if plugin/theme file modifications should be disabled based on the saved option.
+	 *
+	 * @return bool
+	 */
+	public static function is_file_mods_disabled() {
+		$settings = get_option( 'ips_security_settings', array() );
+		// Default: disabled (true) to prevent admin plugin/theme ZIP upload backdoors.
+		return isset( $settings['disable_file_mods'] ) ? (bool) $settings['disable_file_mods'] : true;
 	}
 
 	/**

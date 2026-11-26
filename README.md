@@ -19,7 +19,7 @@
 * **Bad Bot & Vulnerability Scanner Blocker:** Identifies and blocks automated scanning tools such as `sqlmap`, `nikto`, `acunetix`, `dirbuster`, `gobuster`, and `nmap`.
 
 ### 3. Core Hardening & Information Disclosure Prevention
-* **XML-RPC Completely Disabled:** Eliminates DDoS amplification attacks and automated brute-force attacks by disabling the XML-RPC API and removing `X-Pingback` headers.
+* **Configurable XML-RPC Protection:** Disables XML-RPC and removes `X-Pingback` headers by default, with an option in **IPS Security > Security Settings** to enable it when needed (e.g., for Jetpack or mobile apps).
 * **User & Author Enumeration Defense:**
   * Blocks `?author=N` query scanning used by scanners (like WPScan) to discover admin usernames.
   * Restricts unauthenticated access to the WordPress REST API users endpoint (`/wp-json/wp/v2/users`).
@@ -30,17 +30,18 @@
   * `Referrer-Policy: strict-origin-when-cross-origin`
   * `Permissions-Policy: camera=(), microphone=(), geolocation=()`
 * **Version String Removal:** Removes the `the_generator` WordPress version tag from `<head>` and RSS feeds, and removes `?ver=` query strings from CSS/JS assets for guests.
-* **Code Editor Lockdown:** Enforces `DISALLOW_FILE_EDIT` to prevent code injection via the WordPress Theme/Plugin File Editor in `wp-admin`.
+* **Code Editor & File Modification Lockdown:** Enforces `DISALLOW_FILE_EDIT` and optionally locks plugin/theme ZIP uploads, installs, updates, and deletions via `DISALLOW_FILE_MODS` (enabled by default; toggleable in **Security Settings**).
 
 ### 4. Brute-Force Login Shield
 * **Obscured Login Errors:** Replaces specific WordPress error messages with a generic `"Invalid username or password"` notification, stopping attackers from confirming valid usernames.
-* **IP Rate Limiting & Lockout:** Automatically tracks failed login attempts and locks out offending IP addresses for 15 minutes after 5 consecutive failed attempts.
+* **Spoof-Proof IP Rate Limiting & Lockout:** Tracks failed login attempts using `REMOTE_ADDR` by default (ignoring forged `X-Forwarded-For` headers unless `REMOTE_ADDR` matches an explicitly configured trusted proxy IP/CIDR) and locks out offending IPs for 15 minutes after 5 consecutive failed attempts.
 * **Automatic Reset:** Clears failed attempts immediately upon successful authentication.
 
 ### 5. Malicious File Upload Guard
 * **Pre-Upload File Inspection:** Intercepts uploads before they are saved to disk via `wp_handle_upload_prefilter`.
 * **Dangerous Extension Blocker:** Rejects scripts and executable extensions (`.php`, `.phtml`, `.cgi`, `.sh`, `.exe`, `.phar`, `.vbs`, etc.).
 * **Double-Extension Blocker:** Detects and rejects bypass tricks such as `image.php.jpg` or `shell.phtml.png`.
+* **Plugin/Theme Package & Archive Protection:** Blocks plugin/theme `.zip` uploads while file modifications are locked, and offers an optional toggle to block general archive uploads (`.zip`, `.tar`, `.gz`, `.rar`, `.7z`).
 
 ### 6. Admin Security Dashboard & Audit Logging
 * **Security Status Dashboard:** View live status indicators for all protection layers directly from **WP Admin > IPS Security**.

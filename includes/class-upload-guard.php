@@ -19,8 +19,27 @@ class IPS_Security_Upload_Guard {
 	private static $dangerous_extensions = array(
 		'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'pht', 'phtml', 'phps',
 		'phar', 'pl', 'py', 'cgi', 'sh', 'bash', 'exe', 'bat', 'cmd', 'vbs',
-		'htaccess', 'htpasswd', 'ini', 'sql', 'sh'
+		'htaccess', 'htpasswd', 'ini', 'sql',
 	);
+
+	/**
+	 * Archive extensions that can be blocked on standard uploads.
+	 *
+	 * @var array
+	 */
+	private static $archive_extensions = array(
+		'zip', 'tar', 'gz', 'bz2', '7z', 'rar',
+	);
+
+	/**
+	 * Check if archive uploads should be blocked in Media Library / general uploads.
+	 *
+	 * @return bool
+	 */
+	public static function is_archive_upload_blocked() {
+		$settings = get_option( 'ips_security_settings', array() );
+		return ! empty( $settings['block_archive_uploads'] );
+	}
 
 	/**
 	 * Initialize upload guard hooks
@@ -37,13 +56,21 @@ class IPS_Security_Upload_Guard {
 	 * @return array
 	 */
 	public static function filter_uploads( $file ) {
-		$filename = isset( $file['name'] ) ? strtolower( (string) $file['name'] ) : '';
+		$raw_name = isset( $file['name'] ) ? (string) $file['name'] : '';
+		$filename = strtolower( trim( $raw_name, " \t\n\r\0\x0B." ) );
 
 		if ( empty( $filename ) ) {
 			return $file;
 		}
 
-		// 1. Detect direct dangerous extensions
+		// 1. Detect null byte in filename (check raw name before trimming)
+		if ( strpos( $raw_name, "\0" ) !== false || strpos( $filename, '%00' ) !== false ) {
+			$file['error'] = 'Security Alert: Malformed file name detected.';
+			self::log_upload_block( $filename, 'Null byte injection in file name' );
+			return $file;
+		}
+
+		// 2. Detect direct dangerous extensions
 		$ext = pathinfo( $filename, PATHINFO_EXTENSION );
 		if ( in_array( $ext, self::$dangerous_extensions, true ) ) {
 			$file['error'] = 'Security Alert: Uploading executable or script files is strictly forbidden.';
@@ -51,7 +78,7 @@ class IPS_Security_Upload_Guard {
 			return $file;
 		}
 
-		// 2. Detect double extensions (e.g. evil.php.jpg, shell.phtml.png)
+		// 3. Detect double extensions (e.g. evil.php.jpg, shell.phtml.png)
 		$parts = explode( '.', $filename );
 		if ( count( $parts ) > 2 ) {
 			array_pop( $parts ); // Remove final extension
@@ -64,10 +91,21 @@ class IPS_Security_Upload_Guard {
 			}
 		}
 
-		// 3. Detect null byte in filename
-		if ( strpos( $filename, "\0" ) !== false || strpos( $filename, '%00' ) !== false ) {
-			$file['error'] = 'Security Alert: Malformed file name detected.';
-			self::log_upload_block( $filename, 'Null byte injection in file name' );
+		// 4. Block plugin/theme package ZIP uploads when file modifications are locked
+		$action            = isset( $_REQUEST['action'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['action'] ) ) : '';
+		$is_package_upload = in_array( $action, array( 'upload-plugin', 'upload-theme' ), true );
+		$file_mods_locked  = ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) || IPS_Security_Hardening::is_file_mods_disabled();
+
+		if ( $is_package_upload && $file_mods_locked ) {
+			$file['error'] = 'Security Alert: Plugin and theme package uploads are disabled by IPS Security Guard.';
+			self::log_upload_block( $filename, 'Blocked plugin/theme package upload while DISALLOW_FILE_MODS is active' );
+			return $file;
+		}
+
+		// 5. Optionally block archive uploads on general upload handlers
+		if ( ! $is_package_upload && self::is_archive_upload_blocked() && in_array( $ext, self::$archive_extensions, true ) ) {
+			$file['error'] = 'Security Alert: Uploading archive files (.' . $ext . ') is disabled by IPS Security Guard.';
+			self::log_upload_block( $filename, 'Archive upload blocked (.' . $ext . ')' );
 			return $file;
 		}
 

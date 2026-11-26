@@ -54,14 +54,75 @@ class IPS_Security_Admin {
 			add_settings_error( 'ips_sec_notices', 'logs_cleared', 'Security audit logs have been cleared.', 'updated' );
 		} elseif ( 'save_settings' === $action ) {
 			check_admin_referer( 'ips_sec_save_settings_nonce' );
-			$settings                   = get_option( 'ips_security_settings', array() );
-			$settings['disable_xmlrpc'] = isset( $_POST['disable_xmlrpc'] ) ? 1 : 0;
+			$settings                          = get_option( 'ips_security_settings', array() );
+			$settings['disable_xmlrpc']        = isset( $_POST['disable_xmlrpc'] ) ? 1 : 0;
+			$settings['disable_file_mods']     = isset( $_POST['disable_file_mods'] ) ? 1 : 0;
+			$settings['block_archive_uploads'] = isset( $_POST['block_archive_uploads'] ) ? 1 : 0;
+
+			$raw_proxies = isset( $_POST['trusted_proxies'] ) ? sanitize_textarea_field( wp_unslash( $_POST['trusted_proxies'] ) ) : '';
+			list( $valid_proxies, $invalid_proxies ) = self::sanitize_trusted_proxies( $raw_proxies );
+			$settings['trusted_proxies'] = implode( "\n", $valid_proxies );
+
 			update_option( 'ips_security_settings', $settings );
 			// Re-apply htaccess so the xmlrpc.php rule is added/removed immediately
 			IPS_Security_Htaccess::apply_rules();
-			$xmlrpc_state = $settings['disable_xmlrpc'] ? 'disabled' : 'enabled';
-			add_settings_error( 'ips_sec_notices', 'settings_saved', 'Settings saved. XML-RPC is now <strong>' . esc_html( $xmlrpc_state ) . '</strong>. .htaccess has been updated.', 'updated' );
+
+			if ( ! empty( $invalid_proxies ) ) {
+				add_settings_error(
+					'ips_sec_notices',
+					'invalid_proxies',
+					'Ignored invalid trusted proxy entries: <code>' . esc_html( implode( ', ', $invalid_proxies ) ) . '</code>.',
+					'error'
+				);
+			}
+
+			$xmlrpc_state    = $settings['disable_xmlrpc'] ? 'disabled' : 'enabled';
+			$file_mods_state = $settings['disable_file_mods'] ? 'locked' : 'unlocked';
+			add_settings_error(
+				'ips_sec_notices',
+				'settings_saved',
+				'Settings saved. XML-RPC is <strong>' . esc_html( $xmlrpc_state ) . '</strong> and plugin/theme modifications are <strong>' . esc_html( $file_mods_state ) . '</strong>. .htaccess has been updated.',
+				'updated'
+			);
 		}
+	}
+
+	/**
+	 * Validate and normalize trusted proxy IP/CIDR lines.
+	 *
+	 * @param string $raw
+	 * @return array{0: array, 1: array} Tuple of [valid_entries, invalid_entries].
+	 */
+	private static function sanitize_trusted_proxies( $raw ) {
+		$lines   = array_filter( array_map( 'trim', preg_split( '/[\r\n,]+/', (string) $raw ) ) );
+		$valid   = array();
+		$invalid = array();
+
+		foreach ( $lines as $entry ) {
+			if ( strpos( $entry, '/' ) === false ) {
+				if ( filter_var( $entry, FILTER_VALIDATE_IP ) ) {
+					$valid[] = $entry;
+				} else {
+					$invalid[] = $entry;
+				}
+				continue;
+			}
+
+			list( $subnet, $prefix ) = explode( '/', $entry, 2 );
+			$subnet = trim( $subnet );
+			$prefix = trim( $prefix );
+			$is_v4  = filter_var( $subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 );
+			$is_v6  = filter_var( $subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 );
+			$max    = $is_v4 ? 32 : ( $is_v6 ? 128 : -1 );
+
+			if ( $max > 0 && ctype_digit( $prefix ) && (int) $prefix >= 0 && (int) $prefix <= $max ) {
+				$valid[] = $subnet . '/' . (int) $prefix;
+			} else {
+				$invalid[] = $entry;
+			}
+		}
+
+		return array( array_values( array_unique( $valid ) ), $invalid );
 	}
 
 	/**
@@ -72,12 +133,19 @@ class IPS_Security_Admin {
 			wp_die( 'Access denied.' );
 		}
 
-		$root_rules_active    = IPS_Security_Htaccess::are_rules_active();
-		$uploads_protected    = IPS_Security_Htaccess::is_uploads_protected();
-		$settings             = get_option( 'ips_security_settings', array() );
-		$xmlrpc_disabled      = isset( $settings['disable_xmlrpc'] ) ? (bool) $settings['disable_xmlrpc'] : true;
-		$file_editor_disabled = defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT;
-		$logs                 = get_option( 'ips_security_logs', array() );
+		$root_rules_active       = IPS_Security_Htaccess::are_rules_active();
+		$uploads_protected       = IPS_Security_Htaccess::is_uploads_protected();
+		$settings                = get_option( 'ips_security_settings', array() );
+		$xmlrpc_disabled         = IPS_Security_Hardening::is_xmlrpc_disabled();
+		$file_editor_disabled    = defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT;
+		$file_mods_externally    = IPS_Security_Hardening::is_file_mods_defined_externally();
+		$file_mods_option        = IPS_Security_Hardening::is_file_mods_disabled();
+		$file_mods_active        = $file_mods_externally ? ( defined( 'DISALLOW_FILE_MODS' ) && DISALLOW_FILE_MODS ) : $file_mods_option;
+		$archive_uploads_blocked = IPS_Security_Upload_Guard::is_archive_upload_blocked();
+		$trusted_proxies_raw     = isset( $settings['trusted_proxies'] ) ? (string) $settings['trusted_proxies'] : '';
+		$trusted_proxies_list    = IPS_Security_Firewall::get_trusted_proxies();
+		$detected_ip             = IPS_Security_Firewall::get_client_ip();
+		$logs                    = get_option( 'ips_security_logs', array() );
 
 		?>
 		<div class="wrap">
@@ -153,7 +221,14 @@ class IPS_Security_Admin {
 									<td>
 										<span style="color:#46b450;font-weight:bold;">&#x2714; Active</span>
 									</td>
-									<td>Obscures login errors and automatically locks out offending IPs after 5 consecutive failed attempts.</td>
+									<td>
+										Obscures login errors and locks out offending IPs after 5 failed attempts.
+										<?php if ( empty( $trusted_proxies_list ) ) : ?>
+											Uses strict <code>REMOTE_ADDR</code> (header spoofing blocked).
+										<?php else : ?>
+											Trusted proxies configured (<?php echo esc_html( count( $trusted_proxies_list ) ); ?>).
+										<?php endif; ?>
+									</td>
 								</tr>
 								<tr>
 									<td><strong>Dashboard Code Editor</strong></td>
@@ -165,6 +240,34 @@ class IPS_Security_Admin {
 										<?php endif; ?>
 									</td>
 									<td>Prevents arbitrary PHP script modification directly through WordPress admin.</td>
+								</tr>
+								<tr>
+									<td><strong>Plugin &amp; Theme Modifications</strong></td>
+									<td>
+										<?php if ( $file_mods_active ) : ?>
+											<span style="color:#46b450;font-weight:bold;">&#x2714; Locked</span>
+										<?php else : ?>
+											<span style="color:#f0b849;font-weight:bold;">&#x26A0; Allowed</span>
+										<?php endif; ?>
+									</td>
+									<td>
+										Enforces <code>DISALLOW_FILE_MODS</code> to block unauthorized plugin/theme ZIP uploads, installs, and updates in wp-admin.
+										<?php if ( $file_mods_externally ) : ?>
+											<em>(Controlled by <code>wp-config.php</code>)</em>
+										<?php endif; ?>
+									</td>
+								</tr>
+								<tr>
+									<td><strong>Malicious Upload Guard</strong></td>
+									<td>
+										<span style="color:#46b450;font-weight:bold;">&#x2714; Active</span>
+									</td>
+									<td>
+										Blocks executable scripts, double extensions, and null bytes.
+										<?php if ( $archive_uploads_blocked ) : ?>
+											General archive uploads (<code>.zip</code>, <code>.tar</code>, <code>.gz</code>, etc.) are also blocked.
+										<?php endif; ?>
+									</td>
 								</tr>
 							</tbody>
 						</table>
@@ -245,6 +348,53 @@ class IPS_Security_Admin {
 										<p class="description" style="margin-top:6px;">
 											Blocks <code>xmlrpc.php</code> entirely — recommended unless you use
 											Jetpack, the WordPress mobile app, or another service that requires XML-RPC.
+										</p>
+									</td>
+								</tr>
+								<tr>
+									<th scope="row" style="padding-left:0;">
+										<label for="disable_file_mods">Plugin &amp; Theme Lock</label>
+									</th>
+									<td style="padding-left:0;">
+										<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+											<input type="checkbox" id="disable_file_mods" name="disable_file_mods" value="1"
+												<?php checked( $file_mods_option, true ); ?>>
+											<span>Lock Plugin &amp; Theme Installs/Updates (<code>DISALLOW_FILE_MODS</code>)</span>
+										</label>
+										<p class="description" style="margin-top:6px;">
+											Prevents uploading plugin/theme ZIPs or modifying plugins and themes from wp-admin.
+											Uncheck temporarily when you need to install or update plugins.
+											<?php if ( $file_mods_externally ) : ?>
+												<br><strong>Note:</strong> <code>DISALLOW_FILE_MODS</code> is currently defined in <code>wp-config.php</code> and overrides this setting.
+											<?php endif; ?>
+										</p>
+									</td>
+								</tr>
+								<tr>
+									<th scope="row" style="padding-left:0;">
+										<label for="block_archive_uploads">Archive Uploads</label>
+									</th>
+									<td style="padding-left:0;">
+										<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+											<input type="checkbox" id="block_archive_uploads" name="block_archive_uploads" value="1"
+												<?php checked( $archive_uploads_blocked, true ); ?>>
+											<span>Block Archive Uploads (<code>.zip</code>, <code>.tar</code>, <code>.gz</code>, <code>.rar</code>, <code>.7z</code>)</span>
+										</label>
+										<p class="description" style="margin-top:6px;">
+											Rejects archive uploads in Media Library and standard upload forms.
+										</p>
+									</td>
+								</tr>
+								<tr>
+									<th scope="row" style="padding-left:0;">
+										<label for="trusted_proxies">Trusted Proxies</label>
+									</th>
+									<td style="padding-left:0;">
+										<textarea id="trusted_proxies" name="trusted_proxies" rows="3" class="large-text code" placeholder="e.g. 127.0.0.1&#10;173.245.48.0/20"><?php echo esc_textarea( $trusted_proxies_raw ); ?></textarea>
+										<p class="description" style="margin-top:6px;">
+											Leave blank unless behind a reverse proxy/CDN (Cloudflare, Nginx, Varnish).
+											Only requests arriving from these IPs/CIDRs (one per line) may supply forwarding headers.
+											<br>Detected client IP for this session: <code><?php echo esc_html( $detected_ip ); ?></code>
 										</p>
 									</td>
 								</tr>

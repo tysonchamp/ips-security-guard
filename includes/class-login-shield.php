@@ -21,8 +21,8 @@ class IPS_Security_Login_Shield {
 		// Obscure login error messages to prevent username enumeration
 		add_filter( 'login_errors', array( __CLASS__, 'generic_login_error' ) );
 
-		// Check lockout before authentication
-		add_filter( 'authenticate', array( __CLASS__, 'check_lockout' ), 20, 3 );
+		// Check lockout before WordPress password verification (priority 20).
+		add_filter( 'authenticate', array( __CLASS__, 'check_lockout' ), 10, 3 );
 
 		// Track failed attempts
 		add_action( 'wp_login_failed', array( __CLASS__, 'track_failed_attempt' ) );

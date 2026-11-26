@@ -121,21 +121,127 @@ class IPS_Security_Firewall {
 	}
 
 	/**
-	 * Get sanitized client IP address
+	 * Check whether an IP address matches an exact IP or CIDR range (IPv4 or IPv6).
+	 *
+	 * @param string $ip
+	 * @param string $range
+	 * @return bool
+	 */
+	public static function ip_matches_range( $ip, $range ) {
+		$ip    = trim( (string) $ip );
+		$range = trim( (string) $range );
+
+		if ( empty( $ip ) || empty( $range ) ) {
+			return false;
+		}
+
+		if ( strpos( $range, '/' ) === false ) {
+			$ip_bin    = @inet_pton( $ip );
+			$range_bin = @inet_pton( $range );
+			return ( false !== $ip_bin && $ip_bin === $range_bin );
+		}
+
+		list( $subnet, $prefix ) = explode( '/', $range, 2 );
+		if ( ! is_numeric( $prefix ) ) {
+			return false;
+		}
+
+		$ip_bin     = @inet_pton( $ip );
+		$subnet_bin = @inet_pton( trim( $subnet ) );
+		if ( false === $ip_bin || false === $subnet_bin || strlen( $ip_bin ) !== strlen( $subnet_bin ) ) {
+			return false;
+		}
+
+		$max_bits = strlen( $ip_bin ) * 8;
+		$prefix   = (int) $prefix;
+		if ( $prefix < 0 || $prefix > $max_bits ) {
+			return false;
+		}
+
+		$full_bytes = intdiv( $prefix, 8 );
+		$rem_bits   = $prefix % 8;
+
+		if ( $full_bytes > 0 && substr( $ip_bin, 0, $full_bytes ) !== substr( $subnet_bin, 0, $full_bytes ) ) {
+			return false;
+		}
+
+		if ( $rem_bits > 0 ) {
+			$mask = ( 0xFF << ( 8 - $rem_bits ) ) & 0xFF;
+			if ( ( ord( $ip_bin[ $full_bytes ] ) & $mask ) !== ( ord( $subnet_bin[ $full_bytes ] ) & $mask ) ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Get configured list of trusted reverse proxy IPs or CIDR ranges.
+	 *
+	 * @return array
+	 */
+	public static function get_trusted_proxies() {
+		$settings = get_option( 'ips_security_settings', array() );
+		$raw      = isset( $settings['trusted_proxies'] ) ? (string) $settings['trusted_proxies'] : '';
+		$proxies  = array_values( array_filter( array_map( 'trim', preg_split( '/[\r\n,]+/', $raw ) ) ) );
+
+		if ( function_exists( 'apply_filters' ) ) {
+			$proxies = apply_filters( 'ips_security_trusted_proxies', $proxies );
+		}
+
+		return is_array( $proxies ) ? $proxies : array();
+	}
+
+	/**
+	 * Check if an IP belongs to the trusted proxies list.
+	 *
+	 * @param string $ip
+	 * @param array  $trusted_proxies
+	 * @return bool
+	 */
+	public static function is_trusted_proxy( $ip, $trusted_proxies ) {
+		foreach ( $trusted_proxies as $range ) {
+			if ( self::ip_matches_range( $ip, $range ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Get sanitized client IP address without trusting spoofable headers from untrusted peers.
 	 *
 	 * @return string
 	 */
 	public static function get_client_ip() {
-		$ip = '127.0.0.1';
+		$remote_addr = ! empty( $_SERVER['REMOTE_ADDR'] ) ? trim( (string) $_SERVER['REMOTE_ADDR'] ) : '';
+		$remote_ip   = filter_var( $remote_addr, FILTER_VALIDATE_IP ) ? $remote_addr : '127.0.0.1';
 
-		if ( ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
-			$parts = explode( ',', $_SERVER['HTTP_X_FORWARDED_FOR'] );
-			$ip    = trim( $parts[0] );
-		} elseif ( ! empty( $_SERVER['REMOTE_ADDR'] ) ) {
-			$ip = $_SERVER['REMOTE_ADDR'];
+		$trusted_proxies = self::get_trusted_proxies();
+		if ( empty( $trusted_proxies ) || ! self::is_trusted_proxy( $remote_ip, $trusted_proxies ) ) {
+			return $remote_ip;
 		}
 
-		return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : '127.0.0.1';
+		// Trust Cloudflare header when REMOTE_ADDR is a verified trusted proxy.
+		if ( ! empty( $_SERVER['HTTP_CF_CONNECTING_IP'] ) ) {
+			$cf_ip = trim( (string) $_SERVER['HTTP_CF_CONNECTING_IP'] );
+			if ( filter_var( $cf_ip, FILTER_VALIDATE_IP ) ) {
+				return $cf_ip;
+			}
+		}
+
+		// Walk X-Forwarded-For right-to-left and pick the first valid non-proxy hop.
+		if ( ! empty( $_SERVER['HTTP_X_FORWARDED_FOR'] ) ) {
+			$parts = array_reverse( explode( ',', (string) $_SERVER['HTTP_X_FORWARDED_FOR'] ) );
+			foreach ( $parts as $part ) {
+				$candidate = trim( $part );
+				if ( filter_var( $candidate, FILTER_VALIDATE_IP ) && ! self::is_trusted_proxy( $candidate, $trusted_proxies ) ) {
+					return $candidate;
+				}
+			}
+		}
+
+		return $remote_ip;
 	}
 
 	/**

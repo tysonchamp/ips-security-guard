@@ -29,12 +29,24 @@ class IPS_Security_Htaccess {
 
 		$rules .= "# 1. Protect .htaccess itself\n";
 		$rules .= "<Files .htaccess>\n";
-		$rules .= "    Require all denied\n";
+		$rules .= "    <IfModule mod_authz_core.c>\n";
+		$rules .= "        Require all denied\n";
+		$rules .= "    </IfModule>\n";
+		$rules .= "    <IfModule !mod_authz_core.c>\n";
+		$rules .= "        Order allow,deny\n";
+		$rules .= "        Deny from all\n";
+		$rules .= "    </IfModule>\n";
 		$rules .= "</Files>\n\n";
 
 		$rules .= "# 2. Block access to sensitive files (backups, configs, scripts, swap files)\n";
 		$rules .= "<FilesMatch \"(^#.*#|\\.(bak|conf|dist|fla|inc|ini|log|psd|sh|sql|sw[op])|~)$\">\n";
-		$rules .= "    Require all denied\n";
+		$rules .= "    <IfModule mod_authz_core.c>\n";
+		$rules .= "        Require all denied\n";
+		$rules .= "    </IfModule>\n";
+		$rules .= "    <IfModule !mod_authz_core.c>\n";
+		$rules .= "        Order allow,deny\n";
+		$rules .= "        Deny from all\n";
+		$rules .= "    </IfModule>\n";
 		$rules .= "</FilesMatch>\n\n";
 
 		$rules .= "<IfModule mod_rewrite.c>\n";
@@ -43,10 +55,10 @@ class IPS_Security_Htaccess {
 		$rules .= "# 3. Block access to hidden files and directories (e.g., .git, .env)\n";
 		$rules .= "RewriteRule (^|/)\.(?!well-known) - [F,L]\n\n";
 		$rules .= "# 4. Block direct web access to sensitive file extensions (database dumps, backups, configs)\n";
-		$rules .= "RewriteRule \.(sql|bak|conf|config|dist|fla|inc|ini|log|psd|sh|sw[op]|tar|zip|gz|env)$ - [F,L]\n\n";
+		$rules .= "RewriteRule \.(sql|bak|conf|config|dist|fla|inc|ini|log|psd|sh|sw[op]|tar|zip|gz|env)$ - [F,L,NC]\n\n";
 		$rules .= "# 5. Block direct web access to wp-config.php and version disclosure files\n";
-		$rules .= "RewriteRule ^wp-config\.php$ - [F,L]\n";
-		$rules .= "RewriteRule ^(readme\.html|license\.txt) - [F,L]\n\n";
+		$rules .= "RewriteRule ^wp-config\.php$ - [F,L,NC]\n";
+		$rules .= "RewriteRule ^(readme\.html|license\.txt) - [F,L,NC]\n\n";
 		// 6. XML-RPC block is conditional on the saved setting
 		$settings = get_option( 'ips_security_settings', array() );
 		$disable_xmlrpc = isset( $settings['disable_xmlrpc'] ) ? (bool) $settings['disable_xmlrpc'] : true;
@@ -111,9 +123,18 @@ class IPS_Security_Htaccess {
 		if ( file_exists( $basedir ) && is_writable( $basedir ) ) {
 			$upload_htaccess = trailingslashit( $basedir ) . '.htaccess';
 			$upload_content  = "# Block execution of PHP and executable scripts in uploads directory\n";
+			$upload_content .= "<FilesMatch \"\\.(?i:php[0-9]*|pht|phtml|phps|phar|pl|py|cgi|sh)$\">\n";
+			$upload_content .= "    <IfModule mod_authz_core.c>\n";
+			$upload_content .= "        Require all denied\n";
+			$upload_content .= "    </IfModule>\n";
+			$upload_content .= "    <IfModule !mod_authz_core.c>\n";
+			$upload_content .= "        Order allow,deny\n";
+			$upload_content .= "        Deny from all\n";
+			$upload_content .= "    </IfModule>\n";
+			$upload_content .= "</FilesMatch>\n";
 			$upload_content .= "<IfModule mod_rewrite.c>\n";
 			$upload_content .= "RewriteEngine On\n";
-			$upload_content .= "RewriteRule \.(?:php[0-9]*|pht|phtml|phps|phar)$ - [F,L,NC]\n";
+			$upload_content .= "RewriteRule \\.(?:php[0-9]*|pht|phtml|phps|phar)$ - [F,L,NC]\n";
 			$upload_content .= "</IfModule>\n";
 
 			file_put_contents( $upload_htaccess, $upload_content );
